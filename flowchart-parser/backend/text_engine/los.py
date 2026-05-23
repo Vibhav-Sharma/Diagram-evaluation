@@ -62,6 +62,9 @@ def can_merge_groups(
     group_b: TextGroup,
     barrier_mask: np.ndarray,
     edge_reason: str = "los_check",
+    semantic_confidence: float = 0.0,
+    contextual_similarity: float = 0.0,
+    semantic_reasoning: str = "",
     config: PipelineConfig | None = None,
 ) -> MergeEdge:
     cfg = config or PipelineConfig()
@@ -78,5 +81,8 @@ def can_merge_groups(
         allowed=clear,
         ink_hits=hits,
         ink_ratio=round(ratio, 4),
+        semantic_confidence=semantic_confidence,
+        contextual_similarity=contextual_similarity,
+        semantic_reasoning=semantic_reasoning,
     )
 

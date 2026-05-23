@@ -32,18 +32,28 @@ def _get_ocr_engine():
 
 
 def normalize_ocr_text(text: str) -> str:
-    """Stage 2 — OCR normalization (whitespace / artifacts only)."""
+    """Stage 2 — OCR normalization (whitespace / artifacts / punctuation)."""
     if not text:
         return ""
     t = text.replace("\n", " ").replace("\t", " ")
     t = re.sub(r"[^\S ]+", " ", t)
     t = re.sub(r"\s{2,}", " ", t)
-    t = t.strip()
+    t = t.strip().upper()
+    
+    # Preserve specific connector labels
+    connectors = {"YES", "NO", "Y", "N"}
+    if t in connectors:
+        return t
+        
+    # Strip leading/trailing punctuation (like periods, commas, colons)
+    t = re.sub(r"^[\W_]+", "", t)
+    t = re.sub(r"[\W_]+$", "", t)
+    
     replacements = {
         " l ": " I ",
         " 0 ": " O ",
     }
-    padded = f" {t.upper()} "
+    padded = f" {t} "
     for old, new in replacements.items():
         padded = padded.replace(old, new)
     return padded.strip()

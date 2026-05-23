@@ -166,9 +166,10 @@ function renderMergeEdges(rc: RenderContext, edges: MergeEdge[], allowed: boolea
     rc.ctx.setLineDash([]);
     const mx = ((ca.x + cb.x) / 2) * rc.scale;
     const my = ((ca.y + cb.y) / 2) * rc.scale;
+    const label = e.semantic_reasoning ? e.semantic_reasoning : (e.allowed ? "OK" : "BLOCK");
     drawLabel(
       rc.ctx,
-      e.allowed ? "OK" : "BLOCK",
+      label,
       mx,
       my,
       color,

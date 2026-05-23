@@ -22,6 +22,7 @@ from text_engine.models import PipelineResult, TextGroup
 from text_engine.ocr import run_global_ocr
 from text_engine.role_classifier import classify_roles
 from text_engine.serialize import build_api_response
+from text_engine.complexity import analyze_image_complexity
 from text_engine import visualize
 
 
@@ -58,6 +59,16 @@ def run_text_pipeline(
         barrier_file = save_barrier_mask(
             barrier_mask, debug_path / "05_barrier_mask.png"
         )
+
+    # Calculate Adaptive Complexity Metrics
+    complexity = analyze_image_complexity(
+        blocks=ocr_blocks, 
+        image_shape=bgr.shape, 
+        barrier_mask=barrier_mask
+    )
+    
+    # Scale configuration dynamically based on complexity
+    cfg.merge_threshold = cfg.merge_threshold + (complexity.complexity_score * 0.5)
 
     local_groups, fusion_edges = local_semantic_fusion(
         ocr_blocks,

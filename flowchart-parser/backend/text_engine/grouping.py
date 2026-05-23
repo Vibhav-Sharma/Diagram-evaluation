@@ -20,6 +20,7 @@ from text_engine.models import (
     TextRole,
 )
 from text_engine.role_classifier import CONNECTOR_TOKENS
+from text_engine.semantic_scorer import evaluate_semantic_coherence
 
 # ---------------------------------------------------------------------------
 # Spatial / alignment helpers
@@ -158,15 +159,13 @@ def _has_immediate_separator_between(
 
 
 def _semantically_plausible_merge(text_a: str, text_b: str) -> bool:
-    """Lightweight plausibility — prefer under-merging."""
+    """Fallback plausibility (mostly replaced by evaluate_semantic_coherence)."""
     a = text_a.strip().upper()
     b = text_b.strip().upper()
     if a in CONNECTOR_TOKENS or b in CONNECTOR_TOKENS:
         return False
-    # Don't fuse two full questions
     if "?" in a and "?" in b:
         return False
-    # Avoid merging very long unrelated phrases
     if len(a.split()) > 8 and len(b.split()) > 8:
         return False
     return True
@@ -179,44 +178,37 @@ def _local_fusion_candidate(
     median_w: float,
     barrier_mask: Optional[np.ndarray],
     merge_scale: float = 1.0,
-) -> Tuple[bool, str]:
+) -> Tuple[bool, str, float, float, str]:
     """
-    Decide if two OCR blocks belong to the same visual node (local only).
-
-    Rules: close, aligned, plausible, no immediate separator.
+    Decide if two OCR blocks belong to the same visual node using Context-First grouping.
+    Rules: loose geometric candidacy -> semantic coherence -> no immediate separator.
     """
     if a.role != TextRole.NODE_TEXT or b.role != TextRole.NODE_TEXT:
-        return False, "role_mismatch"
+        return False, "role_mismatch", 0.0, 0.0, ""
 
     if not _semantically_plausible_merge(a.text, b.text):
-        return False, "semantic_block"
+        return False, "semantic_block", 0.0, 0.0, ""
 
     if _has_immediate_separator_between(a, b, barrier_mask):
-        return False, "separator_between"
+        return False, "separator_between", 0.0, 0.0, ""
 
     h_gap = _horizontal_gap(a.bbox, b.bbox)
     v_gap = _vertical_gap(a.bbox, b.bbox)
     ms = max(0.5, merge_scale)
-    max_h_gap = median_w * 0.55 * ms
-    max_v_gap = median_h * 1.35 * ms
-    min_x_ov = max(0.15, 0.35 / ms)
-    min_y_ov = max(0.15, 0.4 / ms)
-
-    x_ov = _x_overlap_ratio(a.bbox, b.bbox)
-    y_ov = _y_overlap_ratio(a.bbox, b.bbox)
-
-    if v_gap <= max_v_gap and x_ov >= min_x_ov:
-        return True, "vertical_stack"
-
-    if h_gap <= max_h_gap and y_ov >= min_y_ov:
-        return True, "horizontal_continue"
-
-    dist = math.hypot(a.center.x - b.center.x, a.center.y - b.center.y)
-    if dist <= median_h * 1.8 * ms and (x_ov >= 0.2 or y_ov >= 0.2):
-        if h_gap <= max_h_gap * 1.2 and v_gap <= max_v_gap * 1.2:
-            return True, "tight_neighbor"
-
-    return False, "spatial_reject"
+    
+    # Relaxed geometric bounds for candidacy
+    max_h_gap = median_w * 2.5 * ms
+    max_v_gap = median_h * 3.5 * ms
+    
+    if h_gap > max_h_gap or v_gap > max_v_gap:
+        return False, "spatial_reject", 0.0, 0.0, ""
+        
+    sem_score, ctx_sim, reason = evaluate_semantic_coherence(a.text, b.text)
+    
+    if sem_score < 0.2:
+        return False, f"semantic_reject ({sem_score:.2f})", sem_score, ctx_sim, reason
+        
+    return True, f"semantic_merge ({sem_score:.2f})", sem_score, ctx_sim, reason
 
 
 # ---------------------------------------------------------------------------
@@ -302,8 +294,8 @@ def local_semantic_fusion(
     for i in range(n):
         for j in range(i + 1, n):
             a, b = node_blocks[i], node_blocks[j]
-            ok, reason = _local_fusion_candidate(
-                a, b, median_h, median_w, barrier_mask=None, merge_scale=merge_scale
+            ok, reason, sem_score, ctx_sim, sem_reason = _local_fusion_candidate(
+                a, b, median_h, median_w, barrier_mask=barrier_mask, merge_scale=merge_scale
             )
             if not ok:
                 continue
@@ -326,7 +318,9 @@ def local_semantic_fusion(
                     confidence=b.confidence,
                 )
                 edge = can_merge_groups(
-                    ga, gb, barrier_mask, edge_reason=reason, config=cfg
+                    ga, gb, barrier_mask, edge_reason=reason, 
+                    semantic_confidence=sem_score, contextual_similarity=ctx_sim,
+                    semantic_reasoning=sem_reason, config=cfg
                 )
                 merge_edges.append(edge)
                 if not edge.allowed:
@@ -377,24 +371,21 @@ def _group_center_distance(a: TextGroup, b: TextGroup) -> float:
 
 def _should_attempt_global_merge(
     a: TextGroup, b: TextGroup, median_h: float
-) -> Tuple[bool, str]:
-    """Conservative second pass — only very tight remnants."""
+) -> Tuple[bool, str, float, float, str]:
+    """Conservative second pass."""
     if a.role != TextRole.NODE_TEXT or b.role != TextRole.NODE_TEXT:
-        return False, "role"
+        return False, "role", 0.0, 0.0, ""
     if not _semantically_plausible_merge(a.text, b.text):
-        return False, "semantic"
+        return False, "semantic", 0.0, 0.0, ""
     dist = _group_center_distance(a, b)
-    if dist > median_h * 3.0:
-        return False, "distance"
-    x_ov = _x_overlap_ratio(a.bbox, b.bbox)
-    y_ov = _y_overlap_ratio(a.bbox, b.bbox)
-    h_gap = _horizontal_gap(a.bbox, b.bbox)
-    v_gap = _vertical_gap(a.bbox, b.bbox)
-    if v_gap <= median_h * 1.2 and x_ov >= 0.4:
-        return True, "global_vertical"
-    if h_gap <= median_h * 0.8 and y_ov >= 0.45:
-        return True, "global_horizontal"
-    return False, "reject"
+    if dist > median_h * 4.0:
+        return False, "distance", 0.0, 0.0, ""
+        
+    sem_score, ctx_sim, reason = evaluate_semantic_coherence(a.text, b.text)
+    if sem_score < 0.3:
+        return False, f"semantic_reject ({sem_score:.2f})", sem_score, ctx_sim, reason
+        
+    return True, f"global_semantic_merge ({sem_score:.2f})", sem_score, ctx_sim, reason
 
 
 def consolidate_with_los(
@@ -429,7 +420,7 @@ def consolidate_with_los(
         uf = _UnionFind(n)
         for i in range(n):
             for j in range(i + 1, n):
-                ok, reason = _should_attempt_global_merge(
+                ok, reason, sem_score, ctx_sim, sem_reason = _should_attempt_global_merge(
                     node_groups[i], node_groups[j], median_h
                 )
                 if not ok:
@@ -439,6 +430,9 @@ def consolidate_with_los(
                     node_groups[j],
                     barrier_mask,
                     edge_reason=reason,
+                    semantic_confidence=sem_score,
+                    contextual_similarity=ctx_sim,
+                    semantic_reasoning=sem_reason,
                     config=cfg,
                 )
                 merge_edges.append(edge)

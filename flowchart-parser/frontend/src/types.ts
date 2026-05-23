@@ -19,6 +19,9 @@ export interface TextGroup {
   bbox: number[];
   center: Point;
   confidence: number;
+  semantic_confidence?: number;
+  geometry_confidence?: number;
+  overall_confidence?: number;
   role: string;
   block_ids: string[];
   blocks?: OCRBlock[];
@@ -33,6 +36,9 @@ export interface MergeEdge {
   ink_ratio: number;
   center_a?: Point;
   center_b?: Point;
+  semantic_confidence?: number;
+  contextual_similarity?: number;
+  semantic_reasoning?: string;
 }
 
 export interface SemanticNode {
@@ -41,6 +47,9 @@ export interface SemanticNode {
   bbox: number[];
   center: Point;
   confidence: number;
+  semantic_confidence?: number;
+  geometry_confidence?: number;
+  overall_confidence?: number;
   role: string;
   source_group_ids?: string[];
 }

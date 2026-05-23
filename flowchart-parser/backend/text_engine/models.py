@@ -87,6 +87,9 @@ class TextGroup:
     bbox: BBox
     center: Point
     confidence: float
+    semantic_confidence: float = 1.0
+    geometry_confidence: float = 1.0
+    overall_confidence: float = 1.0
     role: TextRole = TextRole.NODE_TEXT
 
     @property
@@ -100,6 +103,9 @@ class TextGroup:
             "bbox": self.bbox.as_list(),
             "center": {"x": self.center.x, "y": self.center.y},
             "confidence": round(self.confidence, 4),
+            "semantic_confidence": round(self.semantic_confidence, 4),
+            "geometry_confidence": round(self.geometry_confidence, 4),
+            "overall_confidence": round(self.overall_confidence, 4),
             "role": self.role.value,
             "block_ids": self.block_ids,
         }
@@ -114,6 +120,9 @@ class SemanticNode:
     bbox: BBox
     center: Point
     confidence: float
+    semantic_confidence: float = 1.0
+    geometry_confidence: float = 1.0
+    overall_confidence: float = 1.0
     role: TextRole = TextRole.NODE_TEXT
     source_group_ids: List[str] = field(default_factory=list)
 
@@ -124,6 +133,9 @@ class SemanticNode:
             "bbox": self.bbox.as_list(),
             "center": {"x": self.center.x, "y": self.center.y},
             "confidence": round(self.confidence, 4),
+            "semantic_confidence": round(self.semantic_confidence, 4),
+            "geometry_confidence": round(self.geometry_confidence, 4),
+            "overall_confidence": round(self.overall_confidence, 4),
             "role": self.role.value,
             "source_group_ids": self.source_group_ids,
         }
@@ -139,6 +151,9 @@ class MergeEdge:
     allowed: bool
     ink_hits: int = 0
     ink_ratio: float = 0.0
+    semantic_confidence: float = 0.0
+    contextual_similarity: float = 0.0
+    semantic_reasoning: str = ""
 
 
 @dataclass
